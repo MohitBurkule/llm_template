@@ -84,11 +84,7 @@
     <div id="chat-box" class="chat-box"></div>
     <div id="chat-stats" class="chat-stats hidden"></div>
     <div class="chat-input-container">
-      <input
-              type="text"
-              id="user-input"
-              placeholder="Enter your guess..."
-      />
+      <input type="text" id="user-input" placeholder="Enter your guess..." />
       <button id="send" disabled>Submit</button>
     </div>
   </div>
@@ -98,43 +94,77 @@
   /*************** WebLLM logic ***************/
   import * as webllm from "https://esm.run/@mlc-ai/web-llm";
 
-  // Revised system prompt with explicit instructions and the correct answer.
-  const messages = [
-    {
-      content: "You are a riddle-checking AI. The riddle is: 'I speak without a mouth and hear without ears. I have no body, but I come alive with wind.' The correct answer is 'echo'. When a player submits a guess, if the guess (ignoring case) is 'echo', reply with 'Correct!'. Otherwise, provide a hint related to the riddle without revealing the answer, and ask the player to try again. Do not provide a new riddle.",
-      role: "system",
-    },
-  ];
+  // Updated conversation context:
+  // The system prompt now includes explicit instructions with several examples.
+  // Additional messages follow as examples to further illustrate expected responses.
+const messages = [
+  {
+    role: "system",
+    content: "You are a riddle-checking AI. The riddle is: 'I speak without a mouth and hear without ears. I have no body, but I come alive with wind.' The correct answer is 'echo'. When a player submits a guess, check it against 'echo'. If the guess is exactly 'echo', reply with 'Correct!' and nothing else. If the guess is anything else, reply only with a short hint related to the riddle.Never give the player the actual answer. Do not generate any additional creative or extraneous text."
+  },
+  // {
+  //   role: "user",
+  //   content: "You are a riddle-checking AI. The riddle is: 'I speak without a mouth and hear without ears. I have no body, but I come alive with wind.' The correct answer is 'echo'. When a player submits a guess, check it case-insensitively against 'echo'. If the guess is exactly 'echo', reply with 'Correct!' and nothing else. If the guess is anything else, reply only with a short hint related to the riddle. Do not generate any additional creative or extraneous text.Assume that all the next user responses are from the player"
+  // },
+  // {
+  //   role: "assistant",
+  //   content: "Sure thing! Let's start the game. What is your guess?"
+  // },
+  // {
+  //   role: "user",
+  //   content: "sound"
+  // },
+  // {
+  //   role: "assistant",
+  //   content: "That is also the wrong answer, its  close, but consider a phenomenon that reflects your words."
+  // },
+  // {
+  //   role: "user",
+  //   content: "echo"
+  // },
+  // {
+  //   role: "assistant",
+  //   content: "That is the correct answer"
+  // },
+  // {
+  //   role: "system",
+  //   content: "Lets try that again. You are a riddle-checking AI. The riddle is: 'I speak without a mouth and hear without ears. I have no body, but I come alive with wind.' The correct answer is 'echo'. When a player submits a guess, check it case-insensitively against 'echo'. If the guess is exactly 'echo', reply with 'Correct!' and nothing else. If the guess is anything else, reply only with a short hint related to the riddle. Do not generate any additional creative or extraneous text."
+  // },
+
+];
+
 
   // Filter models to only include those with "q4f32" in their name.
   const availableModels = webllm.prebuiltAppConfig.model_list
           .filter(m => m.model_id.includes("q4f32"))
+          .filter(m => m.model_id.includes("SmolLM2"))
           .map(m => m.model_id);
-  let selectedModel = availableModels[0] || "TinyLlama-1.1B-Chat-v1.0-q4f32_1-MLC-1k";
+  let selectedModel = availableModels[0] || "SmolLM2-360M-Instruct-q4f32_1-MLC";
 
-  // Create an engine instance
+  // Create an engine instance.
   const engine = new webllm.MLCEngine();
 
-  // Show model download progress
+  // Show model download progress.
   function updateEngineInitProgressCallback(report) {
     console.log("initialize", report.progress);
     document.getElementById("download-status").textContent = report.text;
   }
   engine.setInitProgressCallback(updateEngineInitProgressCallback);
 
-  // Download / reload the model
+  // Download / reload the model.
   async function initializeWebLLMEngine() {
     document.getElementById("download-status").classList.remove("hidden");
     selectedModel = document.getElementById("model-selection").value;
     const config = {
-      temperature: 1.0,
+      temperature: 0.2, // Lower temperature reduces creative output.
       top_p: 1,
     };
     await engine.reload(selectedModel, config);
   }
 
-  // Utility for streaming generation
+  // Utility for streaming generation.
   async function streamingGenerating(messages, onUpdate, onFinish, onError) {
+    console.log(messages)
     try {
       let curMessage = "";
       const completion = await engine.chat.completions.create({
@@ -156,54 +186,59 @@
   }
 
   /*************** UI logic ***************/
-  // Called when user submits a guess
+// Called when user submits a guess.
+  // Called when user submits a guess.
   function onMessageSend() {
     const input = document.getElementById("user-input").value.trim();
-    const message = {
-      content: input,
-      role: "user",
-    };
     if (input.length === 0) return;
 
-    // Lock the UI
+    // Disable the UI.
     document.getElementById("send").disabled = true;
 
-    messages.push(message);
-    appendMessage(message);
+    // Append the user's message to the conversation.
+    const userMessage = { role: "user", content: input };
+    messages.push(userMessage);
+    appendMessage(userMessage);
 
-    // Clear and disable input
+    // Clear input and set placeholder.
     document.getElementById("user-input").value = "";
-    document
-            .getElementById("user-input")
-            .setAttribute("placeholder", "Checking your guess...");
+    document.getElementById("user-input").setAttribute("placeholder", "Checking your guess...");
 
-    // Stub for the AI's message
-    const aiMessage = {
-      content: "thinking...",
-      role: "assistant",
-    };
-    appendMessage(aiMessage);
+    // Add a temporary "thinking..." message only to the UI.
+    const tempElement = { role: "assistant", content: "thinking..." };
+    appendMessage(tempElement);
 
-    // This function will handle finalizing
-    const onFinishGenerating = (finalMessage) => {
-      updateLastMessage(finalMessage);
-      document.getElementById("send").disabled = false;
-      document
-              .getElementById("user-input")
-              .setAttribute("placeholder", "Enter your guess...");
+    // IMPORTANT: Do NOT push the temporary assistant message to the messages array.
+    // The messages array must end with a user message when calling streamingGenerating.
 
-      // Show runtime stats
-      engine.runtimeStatsText().then((statsText) => {
-        document.getElementById("chat-stats").classList.remove("hidden");
-        document.getElementById("chat-stats").textContent = statsText;
-      });
-    };
+    // Call streaming generation with the current messages array (which ends with a user message).
+    streamingGenerating(
+            messages,
+            // onUpdate: update the last assistant bubble in the UI.
+            (partialResponse) => {
+              updateLastMessage(partialResponse);
+            },
+            // onFinish: once final response is generated, update the UI and conversation array.
+            (finalMessage) => {
+              // Remove the temporary assistant bubble from the UI if needed, or simply update it.
+              updateLastMessage(finalMessage);
+              // Now append the final assistant message to the messages array.
+              messages.push({ role: "assistant", content: finalMessage });
+              document.getElementById("send").disabled = false;
+              document.getElementById("user-input").setAttribute("placeholder", "Enter your guess...");
 
-    // Stream the generation
-    streamingGenerating(messages, updateLastMessage, onFinishGenerating, console.error);
+              // Optionally, show runtime stats.
+              engine.runtimeStatsText().then((statsText) => {
+                document.getElementById("chat-stats").classList.remove("hidden");
+                document.getElementById("chat-stats").textContent = statsText;
+              });
+            },
+            console.error
+    );
   }
 
-  // Append a new bubble to the chat box
+
+  // Append a new bubble to the chat box.
   function appendMessage(message) {
     const chatBox = document.getElementById("chat-box");
     const container = document.createElement("div");
@@ -222,16 +257,14 @@
     chatBox.scrollTop = chatBox.scrollHeight;
   }
 
-  // Update the most recent bubble's text (AI's bubble in this case)
+  // Update the most recent bubble's text (AI's bubble).
   function updateLastMessage(content) {
-    const messageDoms = document
-            .getElementById("chat-box")
-            .querySelectorAll(".message");
+    const messageDoms = document.getElementById("chat-box").querySelectorAll(".message");
     const lastMessageDom = messageDoms[messageDoms.length - 1];
     lastMessageDom.textContent = content;
   }
 
-  // Populate model dropdown with filtered models
+  // Populate model dropdown with filtered models.
   availableModels.forEach((modelId) => {
     const option = document.createElement("option");
     option.value = modelId;
@@ -240,15 +273,15 @@
   });
   document.getElementById("model-selection").value = selectedModel;
 
-  // Bind the download button
+  // Bind the download button.
   document.getElementById("download").addEventListener("click", () => {
     initializeWebLLMEngine().then(() => {
-      // Enable the Submit button after model is loaded
+      // Enable the Submit button after model is loaded.
       document.getElementById("send").disabled = false;
     });
   });
 
-  // Bind the send button (submit guess)
+  // Bind the send button (submit guess).
   document.getElementById("send").addEventListener("click", () => {
     onMessageSend();
   });
