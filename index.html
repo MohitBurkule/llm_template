@@ -5,42 +5,46 @@
   <title>Riddle AI with WebLLM</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <style>
+    /* Global Styles */
     body {
       font-family: 'Arial', sans-serif;
-      background-color: #2b2b2b;
+      background: linear-gradient(135deg, #2b2b2b, #1a1a1a);
       color: #f4f4f4;
       margin: 0;
+      padding: 20px;
       display: flex;
       flex-direction: column;
       align-items: center;
-      padding: 20px;
     }
     h1, p {
       text-align: center;
     }
+    /* Containers */
     .download-container, .riddle-container {
-      margin: 20px 0;
       width: 90%;
       max-width: 800px;
+      margin: 20px 0;
     }
     .hidden {
       display: none;
     }
+    /* Chat Box */
     .chat-box {
-      background-color: #3e3e3e;
+      background: linear-gradient(135deg, #3e3e3e, #333);
       width: 100%;
-      height: 300px;
+      height: 600px; /* Increased height for a bigger chat window */
       border-radius: 10px;
       overflow-y: auto;
       padding: 15px;
       margin: 10px 0;
-      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.5);
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.6);
     }
     .chat-stats {
       background-color: #4c4c4c;
       padding: 10px;
       margin-top: 10px;
       border-radius: 5px;
+      font-size: 0.85em;
     }
     .chat-input-container {
       display: flex;
@@ -52,13 +56,20 @@
       margin-top: 10px;
       font-size: 0.9em;
     }
+    .button-bar {
+      margin: 10px 0;
+      display: flex;
+      justify-content: center;
+      gap: 10px;
+    }
+    /* Message Styles */
     .message-container {
-      margin: 5px 0;
-      padding: 8px;
-      border-radius: 5px;
+      margin: 8px 0;
+      padding: 10px;
+      border-radius: 8px;
     }
     .assistant {
-      background-color: #444;
+      background-color: #555;
       text-align: left;
     }
     .user {
@@ -69,38 +80,51 @@
       white-space: pre-wrap;
       word-wrap: break-word;
     }
+    /* Input & Buttons */
     input[type="text"] {
       flex: 1;
-      padding: 8px;
+      padding: 10px;
       border-radius: 5px;
       border: none;
+      font-size: 1em;
     }
     button {
-      padding: 8px 15px;
+      padding: 10px 15px;
       border: none;
       border-radius: 5px;
       background-color: #0066cc;
       color: #fff;
       cursor: pointer;
+      font-size: 1em;
+      transition: background-color 0.2s;
+    }
+    button:hover:not(:disabled) {
+      background-color: #005bb5;
     }
     button:disabled {
       background-color: #555;
       cursor: not-allowed;
+    }
+    label {
+      font-size: 1em;
     }
   </style>
 </head>
 <body>
 <h1>Riddle AI with WebLLM</h1>
 
-<!-- Step 1: Model Initialization -->
-<p>Select a model and download it before answering the riddle:</p>
+<!-- Model Control -->
 <div class="download-container">
-  <select id="model-selection"></select>
-  <button id="download">Download</button>
+  <div class="button-bar">
+    <select id="model-selection"></select>
+    <button id="download">Download Model</button>
+    <button id="reload">Reload Model</button>
+    <button id="clear-chat">Clear Chat</button>
+  </div>
   <p id="download-status" class="hidden"></p>
 </div>
 
-<!-- Step 2: Riddle Game -->
+<!-- Riddle & Chat -->
 <div class="riddle-container">
   <p><strong>Riddle:</strong> I speak without a mouth and hear without ears. I have no body, but I come alive with wind. What am I?</p>
   <div class="chat-container">
@@ -123,22 +147,18 @@
 <script type="module">
   import * as webllm from "https://esm.run/@mlc-ai/web-llm";
 
-  // Revised system prompt:
-  // All user submissions will be prefixed with "my guess is ".
-  // The AI must remove that prefix, compare case-insensitively to "echo",
-  // and if it matches exactly, reply with "Correct!".
-  // If not, reply only with a brief hint without revealing the answer.
-  const messages = [
-    {
-      role: "system",
-      content: "You are a riddle answer checking AI. The riddle is: 'I speak without a mouth and hear without ears. I have no body, but I come alive with wind. What am I?' The correct answer is 'echo'. When a player submits a guess compare the guess case-insensitively to 'echo'. If the guess is exactly 'echo', reply with 'Correct!' . Otherwise, reply only with a brief hint related to the riddle without revealing the answer or adding extra commentary.Never reveal the answer 'echo', only explain why the players answer is incorrect and how it does not fulfill one or more of the riddle's requirements."
-    }
-  ];
+  // Preserve your working system prompt exactly.
+  const initialSystemMessage =     {
+    role: "system",
+    content: "You are a riddle answer checking AI. The riddle is: 'I speak without a mouth and hear without ears. I have no body, but I come alive with wind. What am I?' The correct answer is 'echo'. When a player submits a guess compare the guess case-insensitively to 'echo'. If the guess is exactly 'echo', reply with 'Correct!' . Otherwise, reply only with a brief hint related to the riddle without revealing the answer or adding extra commentary.Never reveal the answer 'echo', only explain why the players answer is incorrect and how it does not fulfill one or more of the riddle's requirements."
+  };
 
-  // Filter models: only include those with "q4f32" and optionally "SmolLM2".
+  // Conversation messages. Start with the system prompt.
+  let messages = [initialSystemMessage];
+
+  // Filter models: only include those with "q4f32" (adjust as needed).
   const availableModels = webllm.prebuiltAppConfig.model_list
           .filter(m => m.model_id.includes("q4f32"))
-          // .filter(m => m.model_id.includes("SmolLM2"))
           .map(m => m.model_id);
   let selectedModel = availableModels[0] || "SmolLM2-360M-Instruct-q4f32_1-MLC";
 
@@ -159,6 +179,19 @@
     };
     await engine.reload(selectedModel, config);
   }
+
+  // Auto-download routine: wait until the model list is available then populate and load.
+  window.addEventListener("load", async () => {
+    // Wait until the model list is loaded.
+    while (!webllm.prebuiltAppConfig ||
+    !webllm.prebuiltAppConfig.model_list ||
+    webllm.prebuiltAppConfig.model_list.length === 0) {
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    populateModelSelection();
+    await initializeWebLLMEngine();
+    document.getElementById("send").disabled = false;
+  });
 
   async function streamingGenerating(streamMessages, onUpdate, onFinish, onError) {
     console.log("Streaming with messages:", streamMessages);
@@ -185,10 +218,9 @@
   function onMessageSend() {
     const input = document.getElementById("user-input").value.trim();
     if (input.length === 0) return;
-
     document.getElementById("send").disabled = true;
 
-    // Prepend "my guess is " to the user's submission.
+    // Prepend "my guess is " to user's submission.
     const userContent = "my guess is " + input;
     const userMessage = { role: "user", content: userContent };
     messages.push(userMessage);
@@ -197,25 +229,17 @@
     document.getElementById("user-input").value = "";
     document.getElementById("user-input").setAttribute("placeholder", "Checking your guess...");
 
-    // Display a temporary "thinking..." message only in the UI.
+    // Display a temporary "thinking..." message in the UI.
     const tempElement = { role: "assistant", content: "thinking..." };
     appendMessage(tempElement);
 
     // Determine if history should be sent.
     const useHistory = document.getElementById("history-checkbox").checked;
-    let streamMessages = [];
-    if (useHistory) {
-      streamMessages = messages;
-    } else {
-      // Only pass the system prompt and the latest user message.
-      streamMessages = [messages[0], userMessage];
-    }
+    let streamMessages = useHistory ? messages : [messages[0], userMessage];
 
     streamingGenerating(
             streamMessages,
-            (partialResponse) => {
-              updateLastMessage(partialResponse);
-            },
+            (partialResponse) => { updateLastMessage(partialResponse); },
             (finalMessage) => {
               updateLastMessage(finalMessage);
               messages.push({ role: "assistant", content: finalMessage });
@@ -237,40 +261,45 @@
     const newMessage = document.createElement("div");
     newMessage.classList.add("message");
     newMessage.textContent = message.content;
-
-    if (message.role === "user") {
-      container.classList.add("user");
-    } else {
-      container.classList.add("assistant");
-    }
+    container.classList.add(message.role === "user" ? "user" : "assistant");
     container.appendChild(newMessage);
     chatBox.appendChild(container);
     chatBox.scrollTop = chatBox.scrollHeight;
   }
 
   function updateLastMessage(content) {
-    const messageDoms = document.getElementById("chat-box").querySelectorAll(".message");
-    const lastMessageDom = messageDoms[messageDoms.length - 1];
-    lastMessageDom.textContent = content;
+    const messagesDOM = document.getElementById("chat-box").querySelectorAll(".message");
+    const lastMessageDOM = messagesDOM[messagesDOM.length - 1];
+    lastMessageDOM.textContent = content;
   }
 
-  availableModels.forEach((modelId) => {
-    const option = document.createElement("option");
-    option.value = modelId;
-    option.textContent = modelId;
-    document.getElementById("model-selection").appendChild(option);
-  });
-  document.getElementById("model-selection").value = selectedModel;
-
-  document.getElementById("download").addEventListener("click", () => {
-    initializeWebLLMEngine().then(() => {
-      document.getElementById("send").disabled = false;
+  function populateModelSelection() {
+    const modelSelect = document.getElementById("model-selection");
+    availableModels.forEach((modelId) => {
+      const option = document.createElement("option");
+      option.value = modelId;
+      option.textContent = modelId;
+      modelSelect.appendChild(option);
     });
-  });
+    modelSelect.value = selectedModel;
+  }
 
-  document.getElementById("send").addEventListener("click", () => {
-    onMessageSend();
-  });
+  // Clear chat function resets the chat box and messages (preserving the system prompt).
+  function clearChat() {
+    document.getElementById("chat-box").innerHTML = "";
+    messages = [initialSystemMessage];
+  }
+
+  // Reload model button: reinitializes the engine.
+  async function reloadModel() {
+    document.getElementById("download-status").classList.remove("hidden");
+    await initializeWebLLMEngine();
+  }
+
+  // Button event listeners.
+  document.getElementById("send").addEventListener("click", onMessageSend);
+  document.getElementById("clear-chat").addEventListener("click", clearChat);
+  document.getElementById("reload").addEventListener("click", reloadModel);
 </script>
 </body>
 </html>
