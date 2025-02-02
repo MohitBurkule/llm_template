@@ -13,26 +13,28 @@
       display: flex;
       flex-direction: column;
       align-items: center;
-      padding: 10px;
+      padding: 20px;
     }
     h1, p {
       text-align: center;
     }
     .download-container, .riddle-container {
       margin: 20px 0;
+      width: 90%;
+      max-width: 800px;
     }
     .hidden {
       display: none;
     }
     .chat-box {
       background-color: #3e3e3e;
-      width: 90%;
-      max-width: 600px;
-      height: 150px;
+      width: 100%;
+      height: 300px;
       border-radius: 10px;
       overflow-y: auto;
-      padding: 10px;
+      padding: 15px;
       margin: 10px 0;
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.5);
     }
     .chat-stats {
       background-color: #4c4c4c;
@@ -42,10 +44,13 @@
     }
     .chat-input-container {
       display: flex;
-      justify-content: center;
       align-items: center;
       gap: 10px;
+      margin-top: 15px;
+    }
+    .config-options {
       margin-top: 10px;
+      font-size: 0.9em;
     }
     .message-container {
       margin: 5px 0;
@@ -63,6 +68,24 @@
     .message {
       white-space: pre-wrap;
       word-wrap: break-word;
+    }
+    input[type="text"] {
+      flex: 1;
+      padding: 8px;
+      border-radius: 5px;
+      border: none;
+    }
+    button {
+      padding: 8px 15px;
+      border: none;
+      border-radius: 5px;
+      background-color: #0066cc;
+      color: #fff;
+      cursor: pointer;
+    }
+    button:disabled {
+      background-color: #555;
+      cursor: not-allowed;
     }
   </style>
 </head>
@@ -84,9 +107,15 @@
     <div id="chat-box" class="chat-box"></div>
     <div id="chat-stats" class="chat-stats hidden"></div>
     <div class="chat-input-container">
-      <label for="user-input">My guess is: </label>
+      <label for="user-input">My guess is:</label>
       <input type="text" id="user-input" placeholder="Enter your guess..." />
       <button id="send" disabled>Submit</button>
+    </div>
+    <div class="config-options">
+      <label>
+        <input type="checkbox" id="history-checkbox" checked>
+        Include conversation history in AI prompt
+      </label>
     </div>
   </div>
 </div>
@@ -98,15 +127,15 @@
   // All user submissions will be prefixed with "my guess is ".
   // The AI must remove that prefix, compare case-insensitively to "echo",
   // and if it matches exactly, reply with "Correct!".
-  // If not, reply with a brief hint without revealing the answer.
+  // If not, reply only with a brief hint without revealing the answer.
   const messages = [
     {
       role: "system",
-      content: "You are a riddle answer checking AI. The riddle is: 'I speak without a mouth and hear without ears. I have no body, but I come alive with wind. What am I?' The correct answer is 'echo'. When a player submits a guess compare the guess case-insensitively to 'echo'. If the guess is exactly 'echo', reply with 'Correct!' . Otherwise, reply only with a brief hint related to the riddle without revealing the answer or adding extra commentary.Never reveal the answer first"
+      content: "You are a riddle answer checking AI. The riddle is: 'I speak without a mouth and hear without ears. I have no body, but I come alive with wind. What am I?' The correct answer is 'echo'. When a player submits a guess compare the guess case-insensitively to 'echo'. If the guess is exactly 'echo', reply with 'Correct!' . Otherwise, reply only with a brief hint related to the riddle without revealing the answer or adding extra commentary.Never reveal the answer 'echo', only explain why the players answer is incorrect and how it does not fulfill one or more of the riddle's requirements."
     }
   ];
 
-  // Filter models: only include those with "q4f32" and "SmolLM2".
+  // Filter models: only include those with "q4f32" and optionally "SmolLM2".
   const availableModels = webllm.prebuiltAppConfig.model_list
           .filter(m => m.model_id.includes("q4f32"))
           // .filter(m => m.model_id.includes("SmolLM2"))
@@ -131,13 +160,13 @@
     await engine.reload(selectedModel, config);
   }
 
-  async function streamingGenerating(messages, onUpdate, onFinish, onError) {
-    console.log(messages);
+  async function streamingGenerating(streamMessages, onUpdate, onFinish, onError) {
+    console.log("Streaming with messages:", streamMessages);
     try {
       let curMessage = "";
       const completion = await engine.chat.completions.create({
         stream: true,
-        messages,
+        messages: streamMessages,
       });
       for await (const chunk of completion) {
         const curDelta = chunk.choices[0]?.delta?.content;
@@ -172,9 +201,18 @@
     const tempElement = { role: "assistant", content: "thinking..." };
     appendMessage(tempElement);
 
-    // Do not add the temporary message to the conversation array.
+    // Determine if history should be sent.
+    const useHistory = document.getElementById("history-checkbox").checked;
+    let streamMessages = [];
+    if (useHistory) {
+      streamMessages = messages;
+    } else {
+      // Only pass the system prompt and the latest user message.
+      streamMessages = [messages[0], userMessage];
+    }
+
     streamingGenerating(
-            messages,
+            streamMessages,
             (partialResponse) => {
               updateLastMessage(partialResponse);
             },
