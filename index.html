@@ -28,11 +28,43 @@
     .hidden {
       display: none;
     }
+    /* Spinner & Check Mark */
+    .spinner {
+      border: 4px solid #f3f3f3;
+      border-top: 4px solid #0066cc;
+      border-radius: 50%;
+      width: 16px;
+      height: 16px;
+      animation: spin 1s linear infinite;
+      display: inline-block;
+      vertical-align: middle;
+      margin-right: 8px;
+    }
+    .checkmark {
+      color: #00cc00;
+      font-weight: bold;
+      margin-right: 8px;
+    }
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+    /* Download Status */
+    #download-status {
+      margin-top: 10px;
+      font-size: 1em;
+      padding: 8px;
+      background: #333;
+      border: 1px solid #555;
+      border-radius: 5px;
+      width: 100%;
+      text-align: center;
+    }
     /* Chat Box */
     .chat-box {
       background: linear-gradient(135deg, #3e3e3e, #333);
       width: 100%;
-      height: 600px; /* Increased height for a bigger chat window */
+      height: 600px;
       border-radius: 10px;
       overflow-y: auto;
       padding: 15px;
@@ -117,11 +149,11 @@
 <div class="download-container">
   <div class="button-bar">
     <select id="model-selection"></select>
-    <button id="download">Download Model</button>
-    <button id="reload">Reload Model</button>
+    <!-- Single button for model loading -->
+    <button id="load-model">Load Model</button>
     <button id="clear-chat">Clear Chat</button>
   </div>
-  <p id="download-status" class="hidden"></p>
+  <p id="download-status" class="hidden"><span class="spinner"></span>Preparing to download…</p>
 </div>
 
 <!-- Riddle & Chat -->
@@ -148,7 +180,7 @@
   import * as webllm from "https://esm.run/@mlc-ai/web-llm";
 
   // Preserve your working system prompt exactly.
-  const initialSystemMessage =     {
+  const initialSystemMessage = {
     role: "system",
     content: "You are a riddle answer checking AI. The riddle is: 'I speak without a mouth and hear without ears. I have no body, but I come alive with wind. What am I?' The correct answer is 'echo'. When a player submits a guess compare the guess case-insensitively to 'echo'. If the guess is exactly 'echo', reply with 'Correct!' . Otherwise, reply only with a brief hint related to the riddle without revealing the answer or adding extra commentary.Never reveal the answer 'echo', only explain why the players answer is incorrect and how it does not fulfill one or more of the riddle's requirements."
   };
@@ -156,7 +188,7 @@
   // Conversation messages. Start with the system prompt.
   let messages = [initialSystemMessage];
 
-  // Filter models: only include those with "q4f32" (adjust as needed).
+  // Filter models: only include those with "q4f32".
   const availableModels = webllm.prebuiltAppConfig.model_list
           .filter(m => m.model_id.includes("q4f32"))
           .map(m => m.model_id);
@@ -164,17 +196,53 @@
 
   const engine = new webllm.MLCEngine();
 
+  // Global variable for download timing.
+  let downloadStartTime = null;
+
+  // Update download status using regex to extract parameters and quantization.
   function updateEngineInitProgressCallback(report) {
-    console.log("initialize", report.progress);
-    document.getElementById("download-status").textContent = report.text;
+    console.log("Download progress update:", report);
+    let statusText = "";
+    const spinnerHTML = '<span class="spinner"></span>';
+    if (report.progress === 0) {
+      // Use regex with hyphen delimiters to extract the parameter count and quantization.
+      const paramMatch = selectedModel.match(/-(\d+(?:\.\d+)?[MB])-/);
+      const quantMatch = selectedModel.match(/-(q4f(?:32|16))_/i);
+      const modelName = selectedModel.split("-")[0] || selectedModel;
+      const parameters = paramMatch ? paramMatch[1] : "unknown parameters";
+      const quant = quantMatch ? quantMatch[1] : "unknown quantization";
+      statusText = `⚠️ Preparing to download ${selectedModel} (Model: ${modelName}, Parameters: ${parameters}, Quantization: ${quant}). This may take several minutes if this is your first time loading this model.`;
+    } else if (report.progress > 0 && report.progress < 1) {
+      if (report.text && report.text.toLowerCase().includes("cache")) {
+        statusText = report.text;
+      } else {
+        const elapsed = (Date.now() - downloadStartTime) / 1000;
+        const estimatedTotal = elapsed / report.progress;
+        const remaining = Math.max(estimatedTotal - elapsed, 0);
+        statusText = `Currently preparing for ${selectedModel}: ${(report.progress * 100).toFixed(1)}% downloaded. Estimated time remaining: ${Math.ceil(remaining)} sec.`;
+      }
+    } else if (report.progress === 1) {
+      const totalTime = ((Date.now() - downloadStartTime) / 1000).toFixed(1);
+      statusText = `Using ${selectedModel} – Download completed in ${totalTime} sec.`;
+    }
+    const statusEl = document.getElementById("download-status");
+    if (report.progress === 1) {
+      statusEl.innerHTML = `<span class="checkmark">&#10003;</span>${statusText}`;
+    } else {
+      statusEl.innerHTML = `${spinnerHTML}${statusText}`;
+    }
+    console.log(`Status: ${statusText}`);
   }
   engine.setInitProgressCallback(updateEngineInitProgressCallback);
 
   async function initializeWebLLMEngine() {
-    document.getElementById("download-status").classList.remove("hidden");
+    downloadStartTime = Date.now();
+    const statusEl = document.getElementById("download-status");
+    statusEl.classList.remove("hidden");
     selectedModel = document.getElementById("model-selection").value;
+    console.log("Initializing download for model:", selectedModel);
     const config = {
-      temperature: 0.2, // Lower temperature for deterministic output.
+      temperature: 0.2,
       top_p: 1,
     };
     await engine.reload(selectedModel, config);
@@ -182,7 +250,6 @@
 
   // Auto-download routine: wait until the model list is available then populate and load.
   window.addEventListener("load", async () => {
-    // Wait until the model list is loaded.
     while (!webllm.prebuiltAppConfig ||
     !webllm.prebuiltAppConfig.model_list ||
     webllm.prebuiltAppConfig.model_list.length === 0) {
@@ -219,24 +286,16 @@
     const input = document.getElementById("user-input").value.trim();
     if (input.length === 0) return;
     document.getElementById("send").disabled = true;
-
-    // Prepend "my guess is " to user's submission.
     const userContent = "my guess is " + input;
     const userMessage = { role: "user", content: userContent };
     messages.push(userMessage);
     appendMessage(userMessage);
-
     document.getElementById("user-input").value = "";
     document.getElementById("user-input").setAttribute("placeholder", "Checking your guess...");
-
-    // Display a temporary "thinking..." message in the UI.
     const tempElement = { role: "assistant", content: "thinking..." };
     appendMessage(tempElement);
-
-    // Determine if history should be sent.
     const useHistory = document.getElementById("history-checkbox").checked;
     let streamMessages = useHistory ? messages : [messages[0], userMessage];
-
     streamingGenerating(
             streamMessages,
             (partialResponse) => { updateLastMessage(partialResponse); },
@@ -246,8 +305,9 @@
               document.getElementById("send").disabled = false;
               document.getElementById("user-input").setAttribute("placeholder", "Enter your guess...");
               engine.runtimeStatsText().then((statsText) => {
-                document.getElementById("chat-stats").classList.remove("hidden");
-                document.getElementById("chat-stats").textContent = statsText;
+                const statsEl = document.getElementById("chat-stats");
+                statsEl.classList.remove("hidden");
+                statsEl.textContent = statsText;
               });
             },
             console.error
@@ -284,22 +344,32 @@
     modelSelect.value = selectedModel;
   }
 
-  // Clear chat function resets the chat box and messages (preserving the system prompt).
   function clearChat() {
     document.getElementById("chat-box").innerHTML = "";
     messages = [initialSystemMessage];
   }
 
-  // Reload model button: reinitializes the engine.
-  async function reloadModel() {
-    document.getElementById("download-status").classList.remove("hidden");
+  // Use a single button for loading/reloading the model.
+  async function loadModel() {
+    selectedModel = document.getElementById("model-selection").value;
+    downloadStartTime = Date.now();
+    // Immediately update the status with model details.
+    const paramMatch = selectedModel.match(/-(\d+(?:\.\d+)?[MBb])-/);
+    const quantMatch = selectedModel.match(/-(q4f(?:32|16))_/i);
+    const modelName = selectedModel.split("-")[0] || selectedModel;
+    const parameters = paramMatch ? paramMatch[1] : "unknown parameters";
+    const quant = quantMatch ? quantMatch[1] : "unknown quantization";
+    const initialStatus = `⚠️ Preparing to download ${selectedModel} (Model: ${modelName}, Parameters: ${parameters}, Quantization: ${quant}). This may take several minutes if this is your first time loading this model.`;
+    const statusEl = document.getElementById("download-status");
+    statusEl.innerHTML = `<span class="spinner"></span>${initialStatus}`;
+    statusEl.classList.remove("hidden");
+    console.log("Starting download for model:", selectedModel);
     await initializeWebLLMEngine();
   }
 
-  // Button event listeners.
   document.getElementById("send").addEventListener("click", onMessageSend);
   document.getElementById("clear-chat").addEventListener("click", clearChat);
-  document.getElementById("reload").addEventListener("click", reloadModel);
+  document.getElementById("load-model").addEventListener("click", loadModel);
 </script>
 </body>
 </html>
