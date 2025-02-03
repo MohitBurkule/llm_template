@@ -179,6 +179,20 @@
 <script type="module">
   import * as webllm from "https://esm.run/@mlc-ai/web-llm";
 
+  // Check if WebGPU is supported in the current environment.
+  if (!navigator.gpu) {
+    const statusEl = document.getElementById("download-status");
+    statusEl.classList.remove("hidden");
+    statusEl.style.background = "#a00";
+    statusEl.textContent = "Error: WebGPU is not supported in your current environment. Please use a compatible browser with WebGPU enabled.";
+
+    // Disable interactive elements.
+    document.getElementById("send").disabled = true;
+    document.getElementById("load-model").disabled = true;
+    document.getElementById("clear-chat").disabled = true;
+    throw new Error("WebGPU is not supported in your current environment.");
+  }
+
   // Preserve your working system prompt exactly.
   const initialSystemMessage = {
     role: "system",
